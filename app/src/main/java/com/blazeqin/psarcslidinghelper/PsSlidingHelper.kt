@@ -13,14 +13,14 @@ class PsSlidingHelper private constructor(
     private val context:Context,
     private var pivotX: Int,
     private var pivotY: Int,
-    private val listener: OnSlidingListener
+    private var listener: OnSlidingListener?
 ){
 
-    private val mScroller = Scroller(context)
+    private var mScroller:Scroller? = Scroller(context)
     //滑动速度跟踪器VelocityTracker, 这个类可以用来监听手指移动改变的速度;
-    private val mVelocityTracker = VelocityTracker.obtain()
+    private var mVelocityTracker:VelocityTracker? = VelocityTracker.obtain()
     private val mScrollAvailabilityRatio = .3f
-    private val mHandler  by lazy { InertialSlidingHandler(this@PsSlidingHelper) }
+    private var mHandler:InertialSlidingHandler?  = InertialSlidingHandler(this@PsSlidingHelper)
     private var isRecycled = false//是否已经释放
     private var mSlidingFinishListener:OnSlidingFinishListener? = null
     private var isSelfSliding = false;//是否是自己在滑动
@@ -29,7 +29,7 @@ class PsSlidingHelper private constructor(
     private var mStartY = 0F
     private var isClockwiseScrolling: Boolean = false//是否是顺时针滑动
     private var isShouldBeGetY: Boolean = false//在x和y轴方向，是否y方向滑动距离更大
-
+    private var mLastScrollOffset = 0F
 
     companion object {
         private const val TAG = "PsSlidingHelper"
@@ -86,17 +86,22 @@ class PsSlidingHelper private constructor(
             x = event.x
             y = event.y
         }
-        mVelocityTracker.addMovement(event)//监测移动速度，有人说按2000算，小于2000：慢，大于：快
+        mVelocityTracker?.addMovement(event)//监测移动速度，有人说按2000算，小于2000：慢，大于：快
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (!mScroller.isFinished) {
-                    mScroller.abortAnimation()
+                mScroller?.let {
+                    if (!it.isFinished) {
+                        it.abortAnimation()
+                    }
                 }
             }
             MotionEvent.ACTION_MOVE -> handleActionMove(x,y)
             MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL,MotionEvent.ACTION_OUTSIDE -> {
                 if (isInertialSlidingEnable) {
-
+                    mVelocityTracker?.computeCurrentVelocity(1000)
+                    mScroller?.fling(0,0,mVelocityTracker?.xVelocity?.toInt()?:0,
+                        mVelocityTracker?.yVelocity?.toInt()?:0, Int.MIN_VALUE,Int.MAX_VALUE,Int.MIN_VALUE,Int.MAX_VALUE)
+                    mHandler?.sendEmptyMessage(0)
                 }
             }
             else -> {}
@@ -125,7 +130,7 @@ class PsSlidingHelper private constructor(
             val angle = adjustAngle(Math.toDegrees(Math.acos((Math.pow(lineA,2.0)+Math.pow(lineB,2.0)-Math.pow(lineC,2.0))/(2*lineA*lineB))))
             if (!angle.isNaN()) {
                 isClockwiseScrolling=isClockwise(x,y)
-                listener.onSliding(if(isClockwiseScrolling) angle else -angle)
+                listener?.onSliding(if(isClockwiseScrolling) angle else -angle)
             }
         }
     }
@@ -156,6 +161,14 @@ class PsSlidingHelper private constructor(
         return result
     }
 
+    fun setSelfSliding(isSelfSliding: Boolean) {
+        checkIsRecycled()
+        this.isSelfSliding = isSelfSliding
+    }
+    fun enableInertialSliding(enable: Boolean) {
+        checkIsRecycled()
+        isInertialSlidingEnable = enable
+    }
     /**
      * update the circle X pivot
      */
@@ -183,6 +196,42 @@ class PsSlidingHelper private constructor(
     fun setOnSlideFinishListener(listener: OnSlidingFinishListener) {
         mSlidingFinishListener = listener
     }
+
+    /**
+     *释放资源
+     */
+    fun release() {
+        checkIsRecycled()
+        mScroller = null
+        mVelocityTracker = null
+        listener = null
+        mHandler = null
+        isRecycled = true
+    }
+
+    /**
+     * 处理惯性滑动
+     */
+    fun computeInertialSliding() {
+        checkIsRecycled()
+        mScroller?.apply {
+            //true说明滚动尚未完成，false说明滚动已经完成
+            if (computeScrollOffset()) {//滚动未完成，添加一个角度，继续滚动
+                val y = if (isShouldBeGetY) currY.toFloat() else currX*mScrollAvailabilityRatio
+                if (mLastScrollOffset != 0f) {
+                    val offset = adjustAngle(Math.abs(y - mLastScrollOffset).toDouble())
+                    listener?.onSliding(
+                        if (isClockwiseScrolling) offset else -offset
+                    )
+                }
+                mLastScrollOffset = y
+                mHandler?.sendEmptyMessage(0)
+            }else if (isFinished) {
+                mLastScrollOffset=0f
+                mSlidingFinishListener?.onSlidingFinished()
+            }
+        }
+    }
 }
 
 /**
@@ -190,7 +239,7 @@ class PsSlidingHelper private constructor(
  */
 class InertialSlidingHandler(val mHelper: PsSlidingHelper): Handler() {
     override fun handleMessage(msg: Message?) {
-//        mHelper.computeInertialSliding()
+        mHelper.computeInertialSliding()
     }
 }
 

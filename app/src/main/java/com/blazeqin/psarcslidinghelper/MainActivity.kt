@@ -19,6 +19,7 @@ class MainActivity : AppCompatActivity() {
                     view.rotation += angle
                 }
             })
+            psSlidingHelper?.enableInertialSliding(true)
             psSlidingHelper?.setOnSlideFinishListener(object :OnSlidingFinishListener{
                 override fun onSlidingFinished() {
                     Toast.makeText(baseContext,"finished",Toast.LENGTH_LONG).show()
@@ -29,5 +30,10 @@ class MainActivity : AppCompatActivity() {
             psSlidingHelper?.handleMovement(event)
             true
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        psSlidingHelper?.release()
     }
 }
