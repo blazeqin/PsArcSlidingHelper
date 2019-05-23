@@ -8,7 +8,6 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.widget.Scroller
-import java.lang.IllegalStateException
 
 class PsSlidingHelper private constructor(
     private val context:Context,
@@ -22,12 +21,14 @@ class PsSlidingHelper private constructor(
     private val mVelocityTracker = VelocityTracker.obtain()
     private val mScrollAvailabilityRatio = .3f
     private val mHandler  by lazy { InertialSlidingHandler(this@PsSlidingHelper) }
-    private var isRecycled = false
+    private var isRecycled = false//是否已经释放
     private var mSlidingFinishListener:OnSlidingFinishListener? = null
-    private var isSelfSliding = false;
-    private var isInertialSlidingEnable = false
+    private var isSelfSliding = false;//是否是自己在滑动
+    private var isInertialSlidingEnable = false//是否开启惯性滑动
     private var mStartX = 0F
     private var mStartY = 0F
+    private var isClockwiseScrolling: Boolean = false//是否是顺时针滑动
+    private var isShouldBeGetY: Boolean = false//在x和y轴方向，是否y方向滑动距离更大
 
 
     companion object {
@@ -104,22 +105,55 @@ class PsSlidingHelper private constructor(
         mStartY = y
     }
 
+    /**
+     * 计算滑动的角度
+     *余弦定理 cosA=(b^2+c^2-a^2)/2bc
+     */
     private fun handleActionMove(x: Float, y: Float) {
-        var l = 0f;var t = 0f;var r = 0f;var b = 0f
-        if (mStartX > x) {//x轴，小的在左边，大的在右边
-            l = x
-            r = mStartX
-        }else{
-            l = mStartX
-            r = x
+        //勾股定理求边长
+        val lineA = Math.sqrt(
+            Math.pow(Math.abs(mStartX - pivotX).toDouble(), 2.0) + Math.pow(Math.abs(mStartY - pivotY).toDouble(), 2.0)
+        )
+        val lineB = Math.sqrt(
+            Math.pow(Math.abs(x - pivotX).toDouble(), 2.0) + Math.pow(Math.abs(y - pivotY).toDouble(), 2.0)
+        )
+        val lineC = Math.sqrt(
+            Math.pow(Math.abs(mStartX - x).toDouble(), 2.0) + Math.pow(Math.abs(mStartY - y).toDouble(), 2.0)
+        )
+
+        if (lineA > 0 && lineB > 0 && lineC > 0) {
+            val angle = adjustAngle(Math.toDegrees(Math.acos((Math.pow(lineA,2.0)+Math.pow(lineB,2.0)-Math.pow(lineC,2.0))/(2*lineA*lineB))))
+            if (!angle.isNaN()) {
+                isClockwiseScrolling=isClockwise(x,y)
+                listener.onSliding(if(isClockwiseScrolling) angle else -angle)
+            }
         }
-        if (mStartY > y) {//y轴，小的在上面，大的在下面
-            t = y
-            b = mStartY
-        } else {
-            t = mStartY
-            b = y
+    }
+
+    /**
+     * 是否顺时针滑动
+     * 如果在y方向滑动距离更大。。。
+     * 有bug，有概率会判断失误
+     * 替换方案：A点触摸点，C点滑动点，D点相对点：（A.x-D.x）*(C.y-D.y)-(A.y-D.y)*(C.x-D.x)>0
+     */
+    private fun isClockwise(x: Float, y: Float): Boolean {
+        isShouldBeGetY = Math.abs(y -mStartY) > Math.abs(x - mStartX)
+//        return if (isShouldBeGetY) (x < pivotX != y > mStartY) else (y < pivotY == x > mStartX)
+        return (mStartX-pivotX)*(y-pivotY)-(mStartY-pivotY)*(x-pivotX)>0
+    }
+
+    /**
+     * 调整角度：在0~360
+     */
+    private fun adjustAngle(rotation: Double): Float {
+        var result = rotation.toFloat()
+        if (result < 0) {
+            result += 360F
         }
+        if (result > 360F) {
+            result %= 360F
+        }
+        return result
     }
 
     /**
